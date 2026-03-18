@@ -78,10 +78,16 @@ async def council(request: Request) -> dict:
                     {"prefix_len": min(500, len(cleaned_json_str)), "error": str(e)[:200]},
                 )
                 attempted_prefix = cleaned_json_str[:500]
-                raise ValueError(
-                    "Failed to parse embedded JSON from n8n output via json.loads. "
-                    f"Attempted prefix (500 chars): {attempted_prefix}"
-                ) from e
+                return JSONResponse(
+                    status_code=500,
+                    content={
+                        "error": "Failed to parse embedded JSON from n8n output via json.loads",
+                        "detail": {
+                            "attempted_prefix_500_chars": attempted_prefix,
+                            "json_error": str(e),
+                        },
+                    },
+                )
 
             if not isinstance(parsed, dict):
                 raise ValueError("Parsed embedded JSON is not an object")
