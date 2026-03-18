@@ -52,6 +52,9 @@ async def council(request: Request) -> dict:
         if not isinstance(body, dict):
             raise ValueError("Invalid council payload: expected a JSON object at root")
 
+        # Unwrap n8n "Body" envelope if present
+        if "Body" in body and isinstance(body["Body"], dict): body = body["Body"]
+
         if looks_like_council_request_payload(body):
             council_request = CouncilRequest.model_validate(body)
         elif "output" in body:
