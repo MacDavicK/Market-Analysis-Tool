@@ -1,0 +1,363 @@
+# Bloomberg Terminal — Project Rules & Architecture
+> Version 1.0 | Solo Project by Kavish Jaiswal
+> This document is the single source of truth for all coding tools (Cursor, AntiGravity).
+> Do not deviate from any decision listed here without explicit instruction.
+
+---
+
+## 1. Project Overview
+
+A commercial-grade personal market intelligence dashboard for retail investors. The system
+aggregates multi-asset portfolio data, runs LLM-powered analysis via a council architecture,
+and delivers daily reports with a conversational voice interface.
+
+**Target users:** Family and friends (Phase 1: 3 users, Phase 2: ~10–11 users including
+US-based cousins).
+
+**Legal positioning:** This is an administrative/informational tool only — NOT an investment
+advisor. Every AI-generated output must include a disclaimer. Analysis must never be framed
+as a buy/sell recommendation.
+
+---
+
+## 2. Current State
+
+Layers 1 and 2 are already built and operational in n8n:
+- Daily data aggregation from 10 API sources
+- AI-powered analysis via OpenRouter
+- Report delivery via Gmail and Discord
+
+Everything from Layer 3 onward is greenfield.
+
+---
+
+## 3. Technology Stack
+
+| Layer | Technology | Purpose |
+|---|---|---|
+| Orchestration | n8n (cloud) | Scheduling, data pipelines, webhook triggers |
+| Backend | Python 3.11+ / FastAPI | Council logic, RAG, voice, API gateway |
+| Frontend | Next.js 14 (App Router) | Chat UI, portfolio dashboard, voice interface |
+| Auth | Supabase Auth | User authentication |
+| Relational DB | Supabase (PostgreSQL) | User data, portfolio holdings, report history |
+| Vector DB | Pinecone | Embedded daily reports for RAG queries |
+| LLM Gateway | OpenRouter | Unified API for all LLM calls |
+| Voice STT | OpenAI Whisper | Speech-to-text |
+| Voice TTS | OpenAI TTS | Text-to-speech |
+| Backend Deploy | Railway | FastAPI hosting |
+| Frontend Deploy | Vercel | Next.js hosting |
+
+**Do not suggest alternative technologies.** Every choice above is final and deliberate.
+
+---
+
+## 4. System Architecture
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  LAYER 5 — Conversation Agent                                │
+│  Next.js UI ↔ Whisper STT ↔ Intent Parser ↔ OpenAI TTS      │
+├──────────────────────────────────────────────────────────────┤
+│  LAYER 4 — RAG Layer                                         │
+│  Pinecone Vector DB ← Embedded Daily Reports                 │
+│  Query by: asset / date range / event type                   │
+├──────────────────────────────────────────────────────────────┤
+│  LAYER 3 — LLM Council (FastAPI /council endpoint)           │
+│  Stage 1: 3 models analyze in parallel                       │
+│  Stage 2: Anonymous peer review                              │
+│  Stage 3: Chairman synthesizes final report                  │
+├──────────────────────────────────────────────────────────────┤
+│  LAYER 2 — Delivery (BUILT ✅)                               │
+│  Gmail + Discord via n8n                                     │
+├──────────────────────────────────────────────────────────────┤
+│  LAYER 1 — Data Agent (BUILT ✅)                             │
+│  CoinGecko / Alpha Vantage / NSE Direct / GoldAPI            │
+│  Google Sheets → n8n merge → OpenRouter                      │
+└──────────────────────────────────────────────────────────────┘
+```
+
+n8n triggers daily, calls the FastAPI `/council` webhook, receives the final synthesized
+report, and delivers via Gmail and Discord. n8n does NOT run council logic internally.
+
+---
+
+## 5. LLM Council — Critical Specifications
+
+The council runs ONLY at the final analysis/synthesis stage. It must NEVER be applied to
+data collection or extraction nodes.
+
+### Model Stack (do not substitute)
+
+| Role | Model (OpenRouter ID) | Financial Accuracy |
+|---|---|---|
+| Council Member 1 | `openai/gpt-5-mini` | 87.39% |
+| Council Member 2 | `google/gemini-3-flash-preview` | 83.61% |
+| Council Member 3 | `anthropic/claude-sonnet-4-6` | 83.61% |
+| Chairman | `anthropic/claude-opus-4-6` | 87.82% |
+
+**Retired model:** `google/gemini-2.5-flash` — scored 65.55% on financial reasoning.
+Do not use this model for any analysis task.
+
+### Council Pipeline (3 stages)
+
+```
+Stage 1 — Parallel Analysis
+  Input:  Structured market data payload from n8n
+  Action: Send identical prompt to all 3 council members simultaneously (async)
+  Output: 3 independent analysis responses
+
+Stage 2 — Anonymous Peer Review
+  Input:  All 3 responses, with model identities replaced by labels (Model A, B, C)
+  Action: Each council member reviews and ranks the OTHER two responses
+  Output: 3 ranking/critique responses
+
+Stage 3 — Chairman Synthesis
+  Input:  Original data + all 3 analyses + all 3 peer reviews
+  Model:  claude-opus-4-6
+  Action: Synthesize into single final report
+  Output: Final market intelligence report
+```
+
+### Anti-Hallucination Requirements (non-negotiable)
+
+Every prompt sent to any council model must include these explicit instructions:
+- Never invent, estimate, or fabricate numerical values
+- Preserve exact figures from the input data
+- Return null/unavailable for any missing data point
+- Never present analysis as investment advice
+
+### Cost Target
+~$0.025 per user per daily run. ~$0.75 per user per month.
+
+---
+
+## 6. Data Sources & APIs
+
+### Market Data (existing, do not change)
+
+| API | Data | Status |
+|---|---|---|
+| CoinGecko (paid, $129/mo) | Crypto prices (BTC, ETH, SOL, BNB) | Active |
+| Alpha Vantage | US equities + Indian equities | Active |
+| NSE Direct | Indian market indices | Active |
+| GoldAPI | Gold + silver spot prices | Active |
+
+### Portfolio Onboarding (Phase 2 additions)
+
+| API | Purpose | Users |
+|---|---|---|
+| CASParser | Parse CAS PDFs (CAMS/KFintech/CDSL/NSDL) → structured JSON | Indian users |
+| MFapi.in (free) | Daily NAV for all Indian mutual fund schemes | Indian users |
+| Plaid Investment API | US stock/ETF/retirement account holdings via OAuth | US-based cousins |
+| Binance API (read-only) | Crypto holdings (quantities, average buy price) | All crypto users |
+
+### Asset Classes Tracked
+
+| Asset | Price Source | Holdings Source |
+|---|---|---|
+| Crypto (BTC, ETH, SOL, BNB) | CoinGecko | Binance API / manual |
+| Indian equities | Alpha Vantage / NSE Direct | CAS PDF |
+| Indian MFs + SIPs | MFapi.in (daily NAV) | CAS PDF |
+| Sovereign Gold Bonds | GoldAPI | CAS PDF |
+| Physical / digital gold SIPs | GoldAPI | Manual Google Sheet entry |
+| US stocks + ETFs | Alpha Vantage | Plaid |
+| US retirement (401k, IRA) | Alpha Vantage | Plaid |
+
+All prices must be displayed in both USD and INR.
+
+---
+
+## 7. Multi-User Architecture
+
+**Phase 1 (active):** 3 users — Kavish, father, sister (all Mumbai-based, Indian assets only)
+- Each user has their own n8n workflow
+- Portfolio stored in individual Google Sheets
+- No CASParser or Plaid required yet
+
+**Phase 2 (future):** ~10–11 users — rest of family + US-based cousins
+- Portfolio storage migrates from Google Sheets → Supabase
+- CASParser handles Indian portfolio onboarding (MFs, equities, SGBs)
+- Plaid handles US cousins' brokerage onboarding
+- Each user still has their own n8n workflow
+- Shared market data fetch layer to avoid API rate limit duplication
+
+**Phase 2 onboarding flow (when built):**
+1. User signs up → Supabase Auth
+2. Indian users: upload CAS PDF → CASParser → holdings stored in Supabase
+3. US users: connect broker via Plaid OAuth → holdings stored in Supabase
+4. All users: enter crypto exchange API key (read-only) or manual entry
+5. Physical gold / digital gold SIPs: manual entry form
+6. Monthly: Indian users re-upload CAS to capture new SIP instalments
+
+---
+
+## 8. Repo Structure
+
+```
+bloomberg-terminal/
+├── backend/
+│   ├── main.py                  # FastAPI entry point
+│   ├── routers/
+│   │   ├── council.py           # POST /council — LLM council endpoint
+│   │   ├── rag.py               # POST /rag/query — vector search
+│   │   └── voice.py             # POST /voice/transcribe, /voice/speak
+│   ├── services/
+│   │   ├── council_service.py   # 3-stage council orchestration logic
+│   │   ├── openrouter.py        # OpenRouter API client
+│   │   ├── pinecone_client.py   # Pinecone ingestion + query
+│   │   ├── embeddings.py        # Text → vector embedding logic
+│   │   └── whisper.py           # OpenAI Whisper STT
+│   ├── models/
+│   │   └── schemas.py           # Pydantic request/response models
+│   └── core/
+│       ├── config.py            # Settings from env vars
+│       └── middleware.py        # Auth validation, CORS, logging
+├── frontend/
+│   ├── app/                     # Next.js App Router
+│   │   ├── dashboard/           # Portfolio overview page
+│   │   ├── reports/             # Daily report viewer
+│   │   └── chat/                # Conversational agent UI
+│   ├── components/              # Reusable React components
+│   └── lib/                     # API clients, hooks, utils
+├── n8n/
+│   └── workflows/               # Exported n8n workflow JSON backups
+├── .env.example                 # All required env vars documented
+├── requirements.txt
+└── README.md
+```
+
+---
+
+## 9. Environment Variables
+
+The `.env.example` must document all of the following:
+
+```
+# OpenRouter
+OPENROUTER_API_KEY=
+
+# Supabase
+SUPABASE_URL=
+SUPABASE_SERVICE_KEY=
+SUPABASE_ANON_KEY=
+
+# Pinecone
+PINECONE_API_KEY=
+PINECONE_INDEX_NAME=bloomberg-terminal
+
+# OpenAI (Whisper + TTS)
+OPENAI_API_KEY=
+
+# Market Data APIs
+COINGECKO_API_KEY=
+ALPHA_VANTAGE_API_KEY=
+GOLDAPI_KEY=
+
+# Phase 2 (not required for Phase 1)
+CASPARSER_API_KEY=
+PLAID_CLIENT_ID=
+PLAID_SECRET=
+BINANCE_API_KEY=
+BINANCE_SECRET=
+
+# n8n webhook security
+N8N_WEBHOOK_SECRET=
+```
+
+---
+
+## 10. Build Sprints
+
+### Sprint 0 — Immediate accuracy fix (n8n only, no code)
+- In the existing n8n OpenRouter HTTP Request node, change model from
+  `google/gemini-2.5-flash` to `anthropic/claude-sonnet-4-6`
+- No other changes. This is a one-field update.
+
+### Sprint 1 — Backend Foundation
+- Initialise repo with structure from Section 8
+- FastAPI app with `/health` endpoint
+- Pydantic settings loaded from `.env`
+- OpenRouter client with basic completion test
+- Railway deployment config (Procfile or railway.toml)
+- CORS configured for Vercel frontend domain
+
+### Sprint 2 — LLM Council
+- Implement `council_service.py` — full 3-stage pipeline (async)
+- Stage 1: parallel calls to 3 council members
+- Stage 2: anonymous peer review (model identity labels swapped)
+- Stage 3: chairman synthesis via `claude-opus-4-6`
+- `POST /council` endpoint accepting n8n's market data payload
+- Anti-hallucination guardrails in all prompts
+- n8n updated to call `/council` webhook instead of direct OpenRouter
+
+### Sprint 3 — RAG Layer
+- Pinecone index setup (`bloomberg-terminal`, 1536 dims, cosine similarity)
+- Daily report ingestion: embed report → store with metadata (date, assets, user_id)
+- `POST /rag/query` endpoint for natural language historical queries
+- Query supports filters: asset name, date range, event type
+
+### Sprint 4 — Voice + Frontend
+- OpenAI Whisper integration (`POST /voice/transcribe`)
+- OpenAI TTS integration (`POST /voice/speak`)
+- Next.js frontend scaffolded on Vercel
+- Supabase Auth integrated (login/logout)
+- Pages: Dashboard, Reports, Chat/Voice agent
+- Chat UI connects to `/council` and `/rag/query`
+
+---
+
+## 11. Coding Standards
+
+### Python (Backend)
+- Python 3.11+
+- FastAPI with async/await throughout — all I/O must be non-blocking
+- Pydantic v2 for all request/response schemas
+- Type hints on every function signature
+- No hardcoded strings — all config via `core/config.py` from environment variables
+- All OpenRouter calls wrapped in try/except with structured error logging
+- Never log prompt content or user portfolio data
+
+### Next.js (Frontend)
+- Next.js 14, App Router only (no Pages Router)
+- TypeScript strict mode
+- Tailwind CSS for all styling
+- No inline styles
+- All API calls through a typed client in `lib/api.ts`
+- Environment variables for API URLs via `NEXT_PUBLIC_*`
+
+### General
+- No secrets in source code ever
+- `.env.example` updated whenever a new env var is added
+- Every new endpoint must have a corresponding Pydantic schema
+- All financial figures formatted to 2 decimal places minimum
+- Every AI-generated output must append the disclaimer:
+  "This report is for informational purposes only and does not constitute
+   investment advice."
+
+---
+
+## 12. What This System Is NOT
+
+- Not a trading platform. No order placement, no broker integration for execution.
+- Not a regulated financial service. No SEBI/SEC registration.
+- Not a real-time system. Daily batch processing is the core cadence.
+- Not a general-purpose chatbot. The conversational agent answers questions
+  about the user's portfolio and market data only.
+
+---
+
+## 13. Orchestration Model
+
+**Claude (AI orchestrator)** produces all architectural decisions, prompts, and high-level
+plans. It does not write implementation code directly.
+
+**Cursor** is the primary coding tool. It receives prompts from Claude and implements them.
+
+**AntiGravity** is the secondary coding tool. Used for parallel workstreams or
+when Cursor is unavailable.
+
+**Perplexity** handles research tasks — API documentation, library comparisons,
+best practices for unfamiliar domains.
+
+When in doubt about a decision not covered in this document, stop and ask Claude
+before implementing.
