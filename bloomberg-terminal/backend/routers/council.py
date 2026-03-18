@@ -13,8 +13,8 @@ router = APIRouter()
 
 logger = logging.getLogger("bloomberg_terminal.council.router")
 
-@router.post("/council")
-async def council(body: CouncilRequest, request: Request) -> CouncilResponse | JSONResponse:
+@router.post("/council", response_model=None)
+async def council(body: CouncilRequest, request: Request) -> dict:
     webhook_secret = request.headers.get("X-Webhook-Secret")
     if not webhook_secret or webhook_secret != settings.N8N_WEBHOOK_SECRET:
         return JSONResponse(status_code=401, content={"error": "Unauthorized"})
