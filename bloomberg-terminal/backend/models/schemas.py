@@ -32,6 +32,8 @@ class PeerReview(BaseModel):
 class CouncilResponse(BaseModel):
     report: str
     disclaimer: str
+    email_html: str  # pre-rendered HTML email document
+    discord_message: str  # pre-rendered Discord plain text
     council_members: list[CouncilMemberResponse]
     peer_reviews: list[PeerReview]
     chairman_model: str

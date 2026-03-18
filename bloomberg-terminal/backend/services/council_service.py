@@ -7,6 +7,7 @@ import random
 from typing import Any
 
 from backend.services.openrouter import OpenRouterClient
+from backend.services.report_formatter import format_report
 
 
 logger = logging.getLogger("bloomberg_terminal.council")
@@ -281,9 +282,13 @@ class CouncilService:
         if final_disclaimer not in report_text:
             report_text = f"{report_text}\n{final_disclaimer}"
 
+        formatted = format_report(report_text, report_date)
+
         return {
             "report": report_text,
             "disclaimer": final_disclaimer,
+            "email_html": formatted["email_html"],
+            "discord_message": formatted["discord_message"],
             "council_members": council_members,
             "peer_reviews": peer_reviews,
             "chairman_model": openrouter.CHAIRMAN_MODEL,
